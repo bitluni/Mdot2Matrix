@@ -3,6 +3,7 @@
 ## Goal
 
 This project is a showcase and starting point for M.2 PCIe hardware. The interface chip CH382 was used to inteface between the first PCIe lane and the CH32V208 MCU over UART.
+Check out the [versionProject video](https://youtu.be/yxVQkL01FD4)
 
 ## State
 
