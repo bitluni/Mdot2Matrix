@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Pixel Draw Tool</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; margin: 20px; }
+    .palette {
+      margin: 10px auto;
+      display: grid;
+      grid-template-columns: repeat(16, 20px);
+      gap: 5px;
+      width: fit-content;
+    }
+    .palette div {
+      width: 20px;
+      height: 20px;
+      border: 2px solid transparent;
+      box-sizing: border-box;
+      cursor: pointer;
+    }
+    .grid {
+      margin: 10px auto;
+      display: grid;
+      grid-template-columns: repeat(20, 20px);
+      width: fit-content;
+    }
+    .cell {
+      width: 20px;
+      height: 10px; /* 2:1 ratio */
+      border: 1px solid #ccc;
+      background: #fff;
+      cursor: pointer;
+    }
+    button, input { margin: 10px; padding: 10px 20px; }
+    .left-selected { border: 2px solid black !important; }
+    .right-selected { border: 2px dashed black !important; }
+  </style>
+</head>
+<body>
+  <h1>20x12 Pink Pixel Draw Tool</h1>
+
+  <div class="palette" id="palette"></div>
+  <div class="grid" id="grid"></div>
+
+  <button onclick="selectPort()">Select Serial Port</button>
+  <button onclick="sendFrame()">Send Frame</button>
+  <button onclick="clearGrid()">Clear</button>
+  <button onclick="copyFrame()">Copy Image String</button>
+  <br>
+  <input type="text" id="ipInput" placeholder="ws://localhost:1234" style="width: 300px;" />
+  <button onclick="connectWebSocket()">Connect WebSocket</button>
+  <button onclick="disconnectWebSocket()">Disconnect WebSocket</button>
+  <button onclick="sendToWebSocket()">Send to WebSocket</button>
+  <input type="checkbox" id="recvCheckbox" checked />
+  <label for="recvCheckbox">Receive remote image</label><br>
+  <button onclick="startStreaming()">Start Screen Stream</button>
+  <button onclick="stopStreaming()">Stop Screen Stream</button>
+  <label for="gammaSlider">Gamma: <span id="gammaVal">1.0</span></label>
+  <input type="range" id="gammaSlider" min="0.1" max="5.0" step="0.1" value="1.0" />
+  
+
+  <script>
+    const paletteColors = [
+      "#ffe6f0", "#ffccdf", "#ffb3cf", "#ff99bf",
+      "#ff80af", "#ff669f", "#ff4d8f", "#ff337f",
+      "#ff1a6f", "#ff005f", "#e60056", "#cc004c",
+      "#b30043", "#990039", "#800030", "#660026"
+    ];
+
+    let leftColorIndex = 0;
+    let rightColorIndex = 1;
+    let gridData = Array(12).fill().map(() => Array(20).fill(15)); // default to darkest
+    let port = null;
+    let writer = null;
+    let socket = null;
+    let mouseDown = false;
+    let currentButton = 0;
+
+    const paletteEl = document.getElementById("palette");
+    const gridEl = document.getElementById("grid");
+    const ipInput = document.getElementById("ipInput");
+
+	// Load IP or use default
+	ipInput.value = localStorage.getItem("ws_ip") || "wss://bitluni.net:8443/";
+
+	const recvCheckbox = document.getElementById("recvCheckbox");
+
+
+    function renderPalette() {
+      paletteEl.innerHTML = '';
+      paletteColors.forEach((color, idx) => {
+        const swatch = document.createElement("div");
+        swatch.style.background = color;
+        swatch.className = '';
+        if (idx === leftColorIndex) swatch.classList.add('left-selected');
+        if (idx === rightColorIndex) swatch.classList.add('right-selected');
+
+        swatch.onmousedown = (e) => {
+          e.preventDefault();
+          if (e.button === 2) {
+            rightColorIndex = idx;
+          } else {
+            leftColorIndex = idx;
+          }
+          renderPalette();
+        };
+        swatch.oncontextmenu = e => e.preventDefault();
+        paletteEl.appendChild(swatch);
+      });
+    }
+
+    function renderGrid() {
+      gridEl.innerHTML = '';
+      for (let y = 0; y < 12; y++) {
+        for (let x = 0; x < 20; x++) {
+          const cell = document.createElement("div");
+          cell.className = "cell";
+          cell.dataset.x = x;
+          cell.dataset.y = y;
+          cell.style.background = paletteColors[gridData[y][x]];
+
+          const paintCell = (btn) => {
+            const colorIndex = btn === 2 ? rightColorIndex : leftColorIndex;
+            gridData[y][x] = colorIndex;
+            cell.style.background = paletteColors[colorIndex];
+          };
+
+          cell.onmousedown = (e) => {
+            e.preventDefault();
+            mouseDown = true;
+            currentButton = e.button;
+            paintCell(e.button);
+          };
+
+          cell.onmouseenter = () => {
+            if (mouseDown) paintCell(currentButton);
+          };
+
+          cell.oncontextmenu = e => e.preventDefault();
+          gridEl.appendChild(cell);
+        }
+      }
+    }
+
+    document.body.onmouseup = () => mouseDown = false;
+
+    function clearGrid() {
+      for (let y = 0; y < 12; y++) {
+        for (let x = 0; x < 20; x++) {
+          gridData[y][x] = 15;
+        }
+      }
+      renderGrid();
+    }
+
+    async function selectPort() {
+      try {
+        port = await navigator.serial.requestPort();
+        await port.open({ baudRate: 115200 });
+        await port.setSignals({ dataTerminalReady: true, requestToSend: false });
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+        writer = port.writable.getWriter();
+        console.log("Serial port connected.");
+      } catch (err) {
+        alert("Failed to connect to serial port.");
+        console.error(err);
+      }
+    }
+
+    async function sendFrame() {
+      if (!writer) return;
+      let data = 's';
+      for (let y = 11; y >= 0; y--) {
+        for (let x = 19; x >= 0; x--) {
+          const val = 15 - gridData[y][x];
+          data += val.toString(16);
+        }
+      }
+      try {
+        await writer.write(new TextEncoder().encode(data));
+        await writer.releaseLock();
+        writer = port.writable.getWriter(); // reacquire to flush
+        console.log("Frame sent:", data);
+      } catch (err) {
+        console.error("Error sending frame:", err);
+      }
+    }
+
+	function copyFrame() {
+		let data = 's';
+		for (let y = 11; y >= 0; y--) {
+			for (let x = 19; x >= 0; x--) {
+			const val = 15 - gridData[y][x];
+			data += val.toString(16);
+			}
+		}
+		navigator.clipboard.writeText(data).then(() => {
+			console.log("Copied to clipboard:", data);
+		}).catch(err => {
+			console.error("Clipboard copy failed:", err);
+		});
+	}
+
+    function connectWebSocket() {
+		const ip = ipInput.value.trim();
+		if (!ip) return alert("Enter WebSocket IP");
+
+		localStorage.setItem("ws_ip", ip);
+
+		socket = new WebSocket(ip);
+		socket.onopen = () => console.log("WebSocket connected");
+		socket.onmessage = (event) => {
+			if (!recvCheckbox.checked) return;
+
+			const str = event.data.trim();
+			if (!str.startsWith('s') || str.length !== 241) return;
+
+			let i = 1;
+			for (let y = 11; y >= 0; y--) {
+				for (let x = 19; x >= 0; x--) {
+				const hex = str[i++];
+				const inv = parseInt(hex, 16);
+				const val = 15 - inv;
+				gridData[y][x] = val;
+				}
+			}
+			renderGrid();
+			sendFrame();
+		};
+		socket.onclose = () => console.log("WebSocket closed");
+		socket.onerror = err => console.error("WebSocket error", err);
+    }
+
+    function disconnectWebSocket() {
+      if (socket) {
+        socket.close();
+        socket = null;
+      }
+    }
+
+	function sendToWebSocket() {
+		if (!socket || socket.readyState !== WebSocket.OPEN) {
+			alert("WebSocket is not connected!");
+			return;
+		}
+
+		let data = 's';
+		for (let y = 11; y >= 0; y--) {
+			for (let x = 19; x >= 0; x--) {
+			const val = 15 - gridData[y][x];
+			data += val.toString(16);
+			}
+		}
+
+		socket.send(data);
+		console.log("Sent to WebSocket:", data);
+	}
+
+	let streamInterval = null;
+	let captureVideo = null;
+	let captureCanvas = null;
+	let captureCtx = null;
+
+	async function startStreaming() {
+		if (!socket || socket.readyState !== WebSocket.OPEN) {
+			alert("WebSocket is not connected!");
+			return;
+		}
+
+		try {
+			const mediaStream = await navigator.mediaDevices.getDisplayMedia({
+			video: { width: 400, height: 240 }, // enough resolution to downsample
+			audio: false
+			});
+
+			// Create hidden video + canvas
+			captureVideo = document.createElement("video");
+			captureVideo.srcObject = mediaStream;
+			captureVideo.play();
+
+			captureCanvas = document.createElement("canvas");
+			captureCanvas.width = 20;
+			captureCanvas.height = 12;
+			captureCtx = captureCanvas.getContext("2d");
+
+			streamInterval = setInterval(() => {
+			captureCtx.drawImage(captureVideo, 0, 0, 20, 12);
+			const frame = captureCtx.getImageData(0, 0, 20, 12).data;
+
+			let data = 's';
+			for (let y = 11; y >= 0; y--) {
+				for (let x = 19; x >= 0; x--) {
+				const idx = (y * 20 + x) * 4;
+				const r = frame[idx];
+				const g = frame[idx + 1];
+				const b = frame[idx + 2];
+				const brightness = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
+				const corrected = Math.pow(brightness, gamma);
+				const shade = Math.max(0, Math.round(corrected * 16) - 1);
+				data += shade.toString(16);
+				}
+			}
+
+			socket.send(data);
+			}, 100); // ~10 FPS
+
+			console.log("Streaming started.");
+		} catch (err) {
+			console.error("Failed to start screen stream:", err);
+			alert("Screen sharing was cancelled or failed.");
+		}
+		}
+
+		function stopStreaming() {
+		clearInterval(streamInterval);
+		streamInterval = null;
+
+		if (captureVideo && captureVideo.srcObject) {
+			captureVideo.srcObject.getTracks().forEach(track => track.stop());
+		}
+
+		captureVideo = null;
+		captureCanvas = null;
+		captureCtx = null;
+
+		console.log("Streaming stopped.");
+	}
+
+	let gamma = 1.0;
+
+	const gammaSlider = document.getElementById("gammaSlider");
+	const gammaValLabel = document.getElementById("gammaVal");
+
+	gammaSlider.addEventListener("input", () => {
+		gamma = parseFloat(gammaSlider.value);
+		gammaValLabel.textContent = gamma.toFixed(1);
+	});
+
+
+    // Initialize
+    renderPalette();
+    renderGrid();
+  </script>
+</body>
+</html>
