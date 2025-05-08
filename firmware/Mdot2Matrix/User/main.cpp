@@ -99,9 +99,9 @@ void USART_CFG(void)
 
 int main(void)
 {
-    //USART_Printf_Init(115200);
-    USART_CFG();
-/*
+    USART_Printf_Init(115200);
+    //USART_CFG();
+
     GPIO_InitTypeDef GPIO_InitStructure = {0};
 
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA, ENABLE);
@@ -116,12 +116,12 @@ int main(void)
         GPIO_Init(colBank[i], &GPIO_InitStructure);
     }
 
-    GPIOC->CFGLR =  ((0b1000| 0b00) <<  0) | ((0b1000| 0b00) <<  4) |
-                    ((0b1000| 0b00) <<  8) | ((0b1000| 0b00) << 12) |
-                    ((0b1000| 0b00) << 16) | ((0b1000| 0b00) << 20) |
-                    ((0b1000| 0b00) << 24) | ((0b1000| 0b00) << 28);
-    GPIOC->CFGHR =  ((0b1000| 0b00) <<  0) | ((0b1000| 0b00) <<  4) |
-                    ((0b1000| 0b00) <<  8) | ((0b1000| 0b00) << 12);
+    GPIOC->CFGLR =  ((0b0000| 0b11) <<  0) | ((0b0000| 0b11) <<  4) |
+                    ((0b0000| 0b11) <<  8) | ((0b0000| 0b11) << 12) |
+                    ((0b0000| 0b11) << 16) | ((0b0000| 0b11) << 20) |
+                    ((0b0000| 0b11) << 24) | ((0b0000| 0b11) << 28);
+    GPIOC->CFGHR =  ((0b0000| 0b11) <<  0) | ((0b0000| 0b11) <<  4) |
+                    ((0b0000| 0b11) <<  8) | ((0b0000| 0b11) << 12);
     GPIO_WriteBit(GPIOA, GPIO_Pin_0, Bit_SET);
     GPIO_WriteBit(GPIOC, GPIO_Pin_0, Bit_SET);
     GPIOC->OUTDR = 0b000000000000;
@@ -141,11 +141,10 @@ int main(void)
     SysTick->CTLR = 1 | 2 | 4 | 8;
     NVIC_EnableIRQ(SysTicK_IRQn);
     SetVTFIRQ((u32)SysTick_Handler, SysTicK_IRQn, 0, ENABLE);
-**/
+
     while(1)
     {
-        printf("Juhuuu! It wooorks!\n");
-/*
+        //printf("Juhuuu! It wooorks!\n");
         static int framePos = 0;
         while(USART_GetFlagStatus(USART1, USART_FLAG_RXNE) == RESET);
         u_int8_t c = USART_ReceiveData(USART1);
@@ -169,6 +168,5 @@ int main(void)
                 show();
             }
         }
-        */
     }
 }
